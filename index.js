@@ -5,7 +5,7 @@ import crypto from "crypto";
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-const db = new Database("memoria.db");
+const db = new Database("/data/memoria.db");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS memories (
@@ -36,7 +36,7 @@ app.post("/message", (req, res) => {
       saveObjectLocation(userId, parsed.objectName, parsed.locationText);
 
       return res.json({
-        reply: `MEMO ${parsed.objectName} si trova ${parsed.locationText}`
+        reply: `Ok, segno che ${withArticle(parsed.objectName)} è ${parsed.locationText}.`
       });
     }
 
@@ -45,12 +45,12 @@ app.post("/message", (req, res) => {
 
       if (!found) {
         return res.json({
-          reply: `MEMO ${parsed.objectName} non è stato trovato`
+          reply: `Non ho ancora segnato dove si trova ${withArticle(parsed.objectName)}.`
         });
       }
 
       return res.json({
-        reply: `MEMO ${found.object_name} si trova ${found.location_text}`
+        reply: `${withArticle(found.object_name)} è ${found.location_text}.`
       });
     }
 
@@ -60,7 +60,7 @@ app.post("/message", (req, res) => {
   } catch (err) {
     console.error(err);
     return res.json({
-      reply: "Errore interno"
+      reply: "C'è stato un problema interno."
     });
   }
 });
@@ -72,16 +72,22 @@ app.listen(process.env.PORT || 3000, () => {
 function parseMessage(text) {
   const trimmed = text.trim();
 
-  const save = trimmed.match(/ho messo\s+(?:il|lo|la|le|i)?\s*(.+?)\s+nel\s+(.+)/i);
+  const save = trimmed.match(
+    /ho messo\s+(?:il|lo|la|le|i)?\s*(.+?)\s+((?:nel|nella|nell'|nello|nei|in|dentro|sul|sulla)\s+.+)/i
+  );
+
   if (save) {
     return {
       intent: "save_memory",
       objectName: cleanObjectName(save[1]),
-      locationText: "nel " + cleanText(save[2])
+      locationText: cleanText(save[2])
     };
   }
 
-  const find = trimmed.match(/dove ho messo\s+(?:il|lo|la|le|i)?\s*(.+)/i);
+  const find = trimmed.match(
+    /dove ho messo\s+(?:il|lo|la|le|i)?\s*(.+)/i
+  );
+
   if (find) {
     return {
       intent: "find_memory",
@@ -131,4 +137,10 @@ function cleanText(text) {
     .replace(/[?.!,;:]+$/g, "")
     .trim()
     .toLowerCase();
+}
+
+function withArticle(text) {
+  const value = String(text || "").trim().toLowerCase();
+  if (!value) return value;
+  return `il ${value}`;
 }
