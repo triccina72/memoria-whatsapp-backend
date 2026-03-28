@@ -61,9 +61,9 @@ app.post("/message", (req, res) => {
       });
     }
 
-return res.json({
-  reply: "DEBUG BACKEND OK"
-});
+    return res.json({
+      reply: "Non l'ho capito bene. Puoi riscriverlo in modo un po' più diretto?"
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({
@@ -82,7 +82,7 @@ function parseMessage(text) {
   const trimmed = text.trim();
 
   const saveMatch = trimmed.match(
-    /(?:ho messo|ho lasciato|metti via|segnati che (?:il|lo|la|le|i)?|ricorda che (?:il|lo|la|le|i)?)(?:\s+)?(.+?)\s+(?:nel|nella|in|dentro|sul|sulla)\s+(.+)/i
+    /(?:ho messo|ho lasciato|metti via|segnati che|ricorda che)\s+(?:il|lo|la|le|i)?\s*(.+?)\s+(?:nel|nella|in|dentro|sul|sulla)\s+(.+)/i
   );
 
   if (saveMatch) {
@@ -94,7 +94,7 @@ function parseMessage(text) {
   }
 
   const findMatch = trimmed.match(
-    /(?:dove ho messo|dove sono|dov[eè]'?|ti ricordi dove ho messo)\s+(?:il|lo|la|le|i)?\s*(.+?)\??$/i
+    /(?:dove ho messo|dove sono|ti ricordi dove ho messo|dov'è|dove sta|dove si trova)\s+(?:il|lo|la|le|i)?\s*(.+?)\??$/i
   );
 
   if (findMatch) {
