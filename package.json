@@ -1,0 +1,14 @@
+{
+  "name": "memoria-whatsapp-backend",
+  "version": "1.0.0",
+  "description": "Backend minimale per assistente personale WhatsApp",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2"
+  }
+}
