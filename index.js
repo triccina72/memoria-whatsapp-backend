@@ -23,11 +23,11 @@ app.get("/health", (_req, res) => {
 
 app.post("/message", (req, res) => {
   try {
-    const userId = String(req.body?.userId || "default-user");
+    const userId = String(req.body?.userId || "default-user").trim();
     const text = String(req.body?.text || "").trim();
 
     if (!text) {
-      return res.json({ reply: "Messaggio vuoto" });
+      return res.json({ reply: "Messaggio vuoto." });
     }
 
     const parsed = parseMessage(text);
@@ -36,7 +36,7 @@ app.post("/message", (req, res) => {
       saveObjectLocation(userId, parsed.objectName, parsed.locationText);
 
       return res.json({
-        reply: `${parsed.objectName} è ${parsed.locationText}`
+        reply: `MEMO ${parsed.objectName} si trova ${parsed.locationText}`
       });
     }
 
@@ -45,12 +45,12 @@ app.post("/message", (req, res) => {
 
       if (!found) {
         return res.json({
-          reply: `Non ho trovato ${parsed.objectName}`
+          reply: `MEMO ${parsed.objectName} non è stato trovato`
         });
       }
 
       return res.json({
-        reply: `${found.object_name} è ${found.location_text}`
+        reply: `MEMO ${found.object_name} si trova ${found.location_text}`
       });
     }
 
@@ -70,20 +70,22 @@ app.listen(process.env.PORT || 3000, () => {
 });
 
 function parseMessage(text) {
-  const save = text.match(/ho messo (.+) nel (.+)/i);
+  const trimmed = text.trim();
+
+  const save = trimmed.match(/ho messo\s+(?:il|lo|la|le|i)?\s*(.+?)\s+nel\s+(.+)/i);
   if (save) {
     return {
       intent: "save_memory",
-      objectName: save[1],
-      locationText: "nel " + save[2]
+      objectName: cleanObjectName(save[1]),
+      locationText: "nel " + cleanText(save[2])
     };
   }
 
-  const find = text.match(/dove ho messo (.+)/i);
+  const find = trimmed.match(/dove ho messo\s+(?:il|lo|la|le|i)?\s*(.+)/i);
   if (find) {
     return {
       intent: "find_memory",
-      objectName: find[1]
+      objectName: cleanObjectName(find[1])
     };
   }
 
@@ -108,8 +110,25 @@ function findLatestObjectLocation(userId, objectName) {
     SELECT object_name, location_text
     FROM memories
     WHERE user_id = ?
-    AND object_name LIKE ?
+      AND object_name LIKE ?
     ORDER BY created_at DESC
     LIMIT 1
   `).get(userId, `%${objectName}%`);
+}
+
+function cleanObjectName(text) {
+  return String(text || "")
+    .trim()
+    .replace(/[?.!,;:]+$/g, "")
+    .replace(/^(il|lo|la|le|i)\s+/i, "")
+    .trim()
+    .toLowerCase();
+}
+
+function cleanText(text) {
+  return String(text || "")
+    .trim()
+    .replace(/[?.!,;:]+$/g, "")
+    .trim()
+    .toLowerCase();
 }
