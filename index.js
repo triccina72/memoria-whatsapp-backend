@@ -82,7 +82,7 @@ function parseMessage(text) {
   const trimmed = text.trim();
 
   const saveMatch = trimmed.match(
-    /(?:ho messo|ho lasciato|metti via|segnati che|ricorda che)\s+(?:il|lo|la|le|i)?\s*(.+?)\s+(?:nel|nella|in|dentro|sul|sulla)\s+(.+)/i
+    /(?:ho messo|ho lasciato|metti via|segnati che|ricorda che)\s+(?:nel|nella|nell'|nello|nei|in|dentro|sul|sulla)
   );
 
   if (saveMatch) {
