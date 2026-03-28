@@ -61,9 +61,9 @@ app.post("/message", (req, res) => {
       });
     }
 
-    return res.json({
-      reply: "Per ora posso aiutarti a salvare e ritrovare dove metti le cose."
-    });
+return res.json({
+  reply: "DEBUG BACKEND OK"
+});
   } catch (error) {
     console.error(error);
     return res.status(500).json({
