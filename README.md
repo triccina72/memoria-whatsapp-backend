@@ -2,7 +2,7 @@
 
 Backend minimale per assistente personale WhatsApp con Botpress.
 
-## Funzioni iniziali
+## Funzioni iniziali!
 - salvataggio posizione oggetti
 - ricerca posizione oggetti
 - endpoint `/message`
