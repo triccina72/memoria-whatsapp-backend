@@ -1,6 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const axios = require('axios');
+const { google } = require('googleapis');
 
 const app = express();
 app.use(express.json());
@@ -12,6 +13,18 @@ const pool = new Pool({
 
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const BOTPRESS_API_TOKEN = process.env.BOTPRESS_API_TOKEN;
+const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
+const GOOGLE_SERVICE_ACCOUNT_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+
+// Google Calendar auth
+function getCalendarClient() {
+  const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_KEY);
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/calendar']
+  });
+  return google.calendar({ version: 'v3', auth });
+}
 
 async function initDB() {
   await pool.query(`
@@ -23,7 +36,6 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reminders (
       id SERIAL PRIMARY KEY,
@@ -39,7 +51,6 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
-
   console.log('Database pronto.');
 }
 
@@ -55,7 +66,6 @@ app.post('/memory/save', async (req, res) => {
   const { user_id, object_name, location } = req.body;
   if (!user_id || !object_name || !location)
     return res.status(400).json({ error: 'Parametri mancanti' });
-
   try {
     const existing = await pool.query(
       'SELECT id FROM memories WHERE user_id = $1 AND LOWER(object_name) = LOWER($2)',
@@ -84,7 +94,6 @@ app.post('/memory/find', async (req, res) => {
   const { user_id, object_name } = req.body;
   if (!user_id || !object_name)
     return res.status(400).json({ error: 'Parametri mancanti' });
-
   try {
     const result = await pool.query(
       'SELECT object_name, location, updated_at FROM memories WHERE user_id = $1 AND LOWER(object_name) = LOWER($2)',
@@ -104,8 +113,7 @@ app.post('/memory/find', async (req, res) => {
 
 app.get('/memory/list', async (req, res) => {
   const { user_id } = req.query;
-  if (!user_id) return res.status(400).json({ error: 'Parametro mancante: user_id' });
-
+  if (!user_id) return res.status(400).json({ error: 'Parametro mancante' });
   try {
     const result = await pool.query(
       'SELECT object_name, location, updated_at FROM memories WHERE user_id = $1 ORDER BY updated_at DESC',
@@ -125,13 +133,49 @@ app.post('/reminder/save', async (req, res) => {
   if (!user_id || !conversation_id || !message || !remind_at)
     return res.status(400).json({ error: 'Parametri mancanti' });
 
+  const selectedChannel = channel || 'whatsapp';
+  let calendarEventId = null;
+  let finalChannel = selectedChannel;
+
+  // Prova Calendar se richiesto o come fallback
+  if (selectedChannel === 'calendar' || selectedChannel === 'both') {
+    try {
+      const calendar = getCalendarClient();
+      const startTime = new Date(remind_at);
+      const endTime = new Date(startTime.getTime() + 30 * 60000);
+      const event = await calendar.events.insert({
+        calendarId: GOOGLE_CALENDAR_ID,
+        requestBody: {
+          summary: `🔔 ${message}`,
+          start: { dateTime: startTime.toISOString() },
+          end: { dateTime: endTime.toISOString() },
+          reminders: {
+            useDefault: false,
+            overrides: [{ method: 'popup', minutes: 0 }]
+          }
+        }
+      });
+      calendarEventId = event.data.id;
+      finalChannel = selectedChannel;
+    } catch (err) {
+      console.error('Errore Calendar:', err.message);
+      finalChannel = 'whatsapp';
+    }
+  }
+
   try {
     await pool.query(
       `INSERT INTO reminders (user_id, conversation_id, message, remind_at, channel, recurrence)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [user_id, conversation_id, message, remind_at, channel || 'whatsapp', recurrence || 'none']
+      [user_id, conversation_id, message, remind_at, finalChannel, recurrence || 'none']
     );
-    return res.json({ success: true, message, remind_at, channel: channel || 'whatsapp' });
+    return res.json({
+      success: true,
+      message,
+      remind_at,
+      channel: finalChannel,
+      calendar_event_id: calendarEventId
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore database' });
@@ -141,7 +185,6 @@ app.post('/reminder/save', async (req, res) => {
 app.get('/reminder/list', async (req, res) => {
   const { user_id } = req.query;
   if (!user_id) return res.status(400).json({ error: 'Parametro mancante' });
-
   try {
     const result = await pool.query(
       'SELECT * FROM reminders WHERE user_id = $1 AND done = FALSE ORDER BY remind_at ASC',
@@ -160,17 +203,15 @@ async function checkReminders() {
   try {
     const now = new Date();
     const today = now.toISOString().split('T')[0];
-
     const result = await pool.query(
-      `SELECT * FROM reminders WHERE done = FALSE AND remind_at <= NOW()`
+      `SELECT * FROM reminders WHERE done = FALSE AND remind_at <= NOW() AND channel = 'whatsapp'`
     );
-
     for (const reminder of result.rows) {
       const isRecurring = reminder.recurrence !== 'none';
       const whatsappToday = reminder.last_whatsapp_date === today ? reminder.whatsapp_count_today : 0;
       const canSendWhatsapp = whatsappToday < 2;
 
-      if (reminder.channel === 'whatsapp' && canSendWhatsapp) {
+      if (canSendWhatsapp) {
         await sendWhatsappMessage(reminder.conversation_id, `🔔 Reminder: ${reminder.message}`);
         await pool.query(
           `UPDATE reminders SET
@@ -196,7 +237,7 @@ async function sendWhatsappMessage(conversationId, text) {
   try {
     await axios.post(
       `https://api.botpress.cloud/v1/chat/conversations/${conversationId}/messages`,
-      { type: 'text', text: text },
+      { type: 'text', text },
       {
         headers: {
           'Authorization': `Bearer ${BOTPRESS_API_TOKEN}`,
@@ -217,113 +258,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server avviato sulla porta ${PORT}`);
 });
-
-      return res.json({
-        reply: `Ok, segno che ${withArticle(parsed.objectName)} è ${parsed.locationText}.`
-      });
-    }
-
-    if (parsed.intent === "find_memory") {
-      const found = findLatestObjectLocation(userId, parsed.objectName);
-
-      if (!found) {
-        return res.json({
-          reply: `Non ho ancora segnato dove si trova ${withArticle(parsed.objectName)}.`
-        });
-      }
-
-      return res.json({
-        reply: `${withArticle(found.object_name)} è ${found.location_text}.`
-      });
-    }
-
-    return res.json({
-      reply: "Non ho capito bene, puoi riscriverlo?"
-    });
-  } catch (err) {
-    console.error(err);
-    return res.json({
-      reply: "C'è stato un problema interno."
-    });
-  }
-});
-
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Server attivo");
-});
-
-function parseMessage(text) {
-  const trimmed = text.trim();
-
-  const save = trimmed.match(
-    /ho messo\s+(?:il|lo|la|le|i)?\s*(.+?)\s+((?:nel|nella|nell'|nello|nei|in|dentro|sul|sulla)\s+.+)/i
-  );
-
-  if (save) {
-    return {
-      intent: "save_memory",
-      objectName: cleanObjectName(save[1]),
-      locationText: cleanText(save[2])
-    };
-  }
-
-  const find = trimmed.match(
-    /dove ho messo\s+(?:il|lo|la|le|i)?\s*(.+)/i
-  );
-
-  if (find) {
-    return {
-      intent: "find_memory",
-      objectName: cleanObjectName(find[1])
-    };
-  }
-
-  return { intent: "unknown" };
-}
-
-function saveObjectLocation(userId, objectName, locationText) {
-  db.prepare(`
-    INSERT INTO memories (id, user_id, object_name, location_text, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(
-    crypto.randomUUID(),
-    userId,
-    objectName,
-    locationText,
-    new Date().toISOString()
-  );
-}
-
-function findLatestObjectLocation(userId, objectName) {
-  return db.prepare(`
-    SELECT object_name, location_text
-    FROM memories
-    WHERE user_id = ?
-      AND object_name LIKE ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(userId, `%${objectName}%`);
-}
-
-function cleanObjectName(text) {
-  return String(text || "")
-    .trim()
-    .replace(/[?.!,;:]+$/g, "")
-    .replace(/^(il|lo|la|le|i)\s+/i, "")
-    .trim()
-    .toLowerCase();
-}
-
-function cleanText(text) {
-  return String(text || "")
-    .trim()
-    .replace(/[?.!,;:]+$/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-function withArticle(text) {
-  const value = String(text || "").trim().toLowerCase();
-  if (!value) return value;
-  return `il ${value}`;
-}
